@@ -74,12 +74,12 @@ pip install git+https://github.com/LauritsSkov/Introgression-detection.git
 
 ### Docker
 
-The Docker image contains hmmix together with bcftools and vcftools. Mount your working directory at `/data`:
+The Docker image contains hmmix together with bcftools and vcftools. Mount your working directory at `/data` and run as your own user, so that the output files belong to you:
 
 ```bash
 docker build -t hmmix .
-docker run --rm -v "$PWD":/data hmmix make_test_data
-docker run --rm -v "$PWD":/data hmmix train -obs=obs.txt -weights=weights.bed -mutrates=mutrates.bed -param=Initialguesses.json -out=trained.json
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/data hmmix make_test_data
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/data hmmix train -obs=obs.txt -weights=weights.bed -mutrates=mutrates.bed -param=Initialguesses.json -out=trained.json
 ```
 
 ### Running the tests

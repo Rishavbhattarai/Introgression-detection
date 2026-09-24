@@ -1,7 +1,7 @@
 # hmmix with bcftools and vcftools, which create_outgroup/create_ingroup and -admixpop need.
 #
 #   docker build -t hmmix .
-#   docker run --rm -v "$PWD":/data hmmix make_test_data
+#   docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/data hmmix make_test_data
 #
 # `docker build --target test .` also runs the test suite inside the image.
 FROM python:3.13-slim AS runtime
@@ -13,6 +13,7 @@ RUN apt-get update \
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     MPLBACKEND=Agg \
+    MPLCONFIGDIR=/tmp/matplotlib \
     NUMBA_CACHE_DIR=/opt/numba-cache
 
 WORKDIR /opt/hmmix
@@ -28,6 +29,12 @@ USER hmmix
 # (numba recompiles by itself if the image runs on a CPU with different features).
 COPY tests/regression/run_pipeline.sh /opt/hmmix/run_pipeline.sh
 RUN bash /opt/hmmix/run_pipeline.sh /tmp/warmup hmmix && rm -rf /tmp/warmup
+
+# Allow running as any user (docker run --user "$(id -u):$(id -g)"), so that output
+# files in the mounted directory belong to the caller.
+USER root
+RUN chmod -R a+rwX /opt/numba-cache
+USER hmmix
 
 WORKDIR /data
 ENTRYPOINT ["hmmix"]

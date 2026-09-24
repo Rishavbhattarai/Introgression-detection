@@ -53,8 +53,10 @@ jobs:
         run: docker build -t hmmix .
       - name: Smoke test
         run: |
-          mkdir -p smoke && chmod 777 smoke
-          docker run --rm -v "$PWD/smoke":/data hmmix make_test_data -windows=2000 -chromosomes=1
-          docker run --rm -v "$PWD/smoke":/data hmmix train -obs=obs.txt -weights=weights.bed -mutrates=mutrates.bed -param=Initialguesses.json -out=trained.json
-          docker run --rm -v "$PWD/smoke":/data hmmix decode -obs=obs.txt -weights=weights.bed -mutrates=mutrates.bed -param=trained.json -out=decoded
+          mkdir -p smoke
+          RUN="docker run --rm --user $(id -u):$(id -g) -v $PWD/smoke:/data hmmix"
+          $RUN make_test_data -windows=2000 -chromosomes=1
+          $RUN train -obs=obs.txt -weights=weights.bed -mutrates=mutrates.bed -param=Initialguesses.json -out=trained.json
+          $RUN decode -obs=obs.txt -weights=weights.bed -mutrates=mutrates.bed -param=trained.json -out=decoded
+          $RUN artemis -obs=obs.txt -param=trained.json -out=artemis.txt -out_plot=artemis.png -steps=5
           head smoke/decoded.diploid.txt

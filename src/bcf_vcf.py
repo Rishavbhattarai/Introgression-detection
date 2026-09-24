@@ -1,8 +1,13 @@
 import os
 from collections import defaultdict
+from shutil import which
 
 from helper_functions import sortby, Make_folder_if_not_exists, load_fasta, convert_to_bases, clean_files
 
+
+def does_bcftools_exist(software):
+    '''Check if software exists'''
+    return which(software) is not None
 
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------------

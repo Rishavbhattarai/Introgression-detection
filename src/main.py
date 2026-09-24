@@ -3,12 +3,12 @@ import numpy as np
 import sys
 from hmm_functions import TrainModel, write_HMM_to_file, read_HMM_parameters_from_file, Write_Decoded_output, Calculate_Posterior_probabillities, PMAP_path, Viterbi_path, Hybrid_path, Convert_genome_coordinates, Write_posterior_probs, Make_inhomogeneous_transition_matrix, Simulate_from_transition_matrix, Write_inhomogeneous_transition_matrix, Emission_probs_poisson
 from bcf_vcf import make_out_group, make_ingroup_obs
-from make_test_data import simulate_path, write_data
+from make_test_data import simulate_path, write_data, set_seed
 from make_mutationrate import make_mutation_rate
 from helper_functions import Load_observations_weights_mutrates, handle_individuals_input, handle_infiles, combined_files, find_runs
-from artemis import Find_best_alpha
+from artemis import Find_best_alpha, Find_best_alpha_simulated, Make_Artemis_Plot, Write_Artemis_output
 
-VERSION = '0.8.2'
+VERSION = '0.9.2'
 
 def print_script_usage():
     toprint = f'''
@@ -59,6 +59,8 @@ Different modes (you can also see the options for each by writing hmmix make_tes
     -out                outputfile (default is a file named trained.json)
     -window_size        size of bins (default is 1000 bp)
     -haploid            Change from using diploid data to haploid data (default is diploid)
+    -epsilon            Minimum change in log-likelihood for model convergence (default is 1e-3)
+    -max_iterations     Maximum number of iterations before convergence (default is 1000)
 
 > decode                
     -obs                [required] file with observation data
@@ -73,7 +75,7 @@ Different modes (you can also see the options for each by writing hmmix make_tes
     -extrainfo          Add variant position for each SNP (default is off)
     -viterbi            decode using the viterbi algorithm (default is posterior decoding)
     -hybrid             decode using the hybrid algorithm. Set value between 0 and 1 where 0=posterior and 1=viterbi
-    -posterior_probs    File location for posterior prob
+    -posterior_probs    File location for posterior probabilities
 
 > inhomogeneous                
     -obs                [required] file with observation data
@@ -84,26 +86,40 @@ Different modes (you can also see the options for each by writing hmmix make_tes
     -out                outputfile prefix <out>.hap1_sim(0-n).txt and <out>.hap2_sim(0-n).txt if -haploid option is used or <out>.diploid_(0-n).txt (default is stdout)
     -window_size        size of bins (default is 1000 bp)
     -haploid            Change from using diploid data to haploid data (default is diploid)
-    -samples            Number of simulated paths for the inhomogeneous markov chain (default is 100)
     -admixpop           Annotate using vcffile with admixing population (default is none)
     -extrainfo          Add variant position for each SNP (default is off)
+    -samples            Number of simulated paths for the inhomogeneous markov chain (default is 100)
     -inhomogen_matrix   File location for inhomogeneous transition matrix
+    -seed               Set seed (default is 42)
 
 > artemis
+    -obs                [required] file with observation data
+    -chrom              Subset to chromosome or comma separated list of chromosomes e.g chr1 or chr1,chr2,chr3 (default is use all chromosomes)
+    -weights            file with callability (defaults to all positions being called)
+    -mutrates           file with mutation rates (default is mutation rate is uniform)
     -param              [required] markov parameters file (default is human/neanderthal like parameters)
+    -window_size        size of bins (default is 1000 bp)
+    -haploid            Change from using diploid data to haploid data (default is diploid)
     -out_plot           File path for artemis plot - can be pdf or jpg (default is Artemis_plot.pdf)
     -out                Save alphas, likelihoods and pointwise accuracy to file (default is stdout)
-    -windows            Number of Kb windows to create (defaults to 500,000)
-    -iterations         Number of iterations (defaults to 10)
     -start              First alpha values to simulate (default is 0)
     -end                Last alpha values to simulate (default is 1)
     -steps              Number of alpha values to simulate between start and end (defaults to 101)
+
+> artemis_sim
+    -param              [required] markov parameters file (default is human/neanderthal like parameters)
+    -out_plot           File path for artemis plot - can be pdf or jpg (default is Artemis_plot_sim.pdf)
+    -out                Save alphas, likelihoods, pointwise accuracy and confusion matrix to file (default is stdout)
+    -n_sim_windows      Number of Kb windows to create (defaults to 500,000)
     -seed               Set seed (default is 42)
+    -start              First alpha values to simulate (default is 0)
+    -end                Last alpha values to simulate (default is 1)
+    -steps              Number of alpha values to simulate between start and end (defaults to 101)
     '''
 
     return toprint
 
-
+    
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------------
 # Main
@@ -157,6 +173,8 @@ def main():
     train_subparser.add_argument("-out", metavar='',help="outputfile (default is a file named trained.json)", default = 'trained.json')
     train_subparser.add_argument("-window_size", metavar='',help="size of bins (default is 1000 bp)", type=int, default = 1000)
     train_subparser.add_argument("-haploid",help="Change from using diploid data to haploid data (default is diploid)", action='store_true', default = False)
+    train_subparser.add_argument("-epsilon", metavar='',help="Minimum change in log-likelihood for model convergence default is 1e-3)", type=float, default = 1e-3)
+    train_subparser.add_argument("-max_iterations", metavar='',help="Maximum number of iterations before convergence (default is 1000)", type=int, default = 1000)
 
     # Decode model
     decode_subparser = subparser.add_parser('decode', help='Decode HMM')
@@ -188,18 +206,34 @@ def main():
     inhomogen_subparser.add_argument("-admixpop",help="Annotate using vcffile with admixing population (default is none)")
     inhomogen_subparser.add_argument("-extrainfo",help="Add archaic information on each SNP", action='store_true', default = False)
     inhomogen_subparser.add_argument("-inhomogen_matrix",help="File location for inhomogeneous transition matrix", default = None)
+    inhomogen_subparser.add_argument("-seed", metavar='',help="set seed", type=int, default=42)
 
-    # Find best alpha (artemis plos)
-    artemis_subparser = subparser.add_parser('artemis', help='Finds best alphas and make artemis plots')
+    # Find best alpha (artemis plots)
+    artemis_subparser = subparser.add_parser('artemis', help='Finds best alphas and make artemis plots from observed data')
+    artemis_subparser.add_argument("-obs",help="[required] file with observation data", type=str, required = True)
+    artemis_subparser.add_argument("-chrom",help="Subset to chromosome or comma separated list of chromosomes e.g chr1 or chr1,chr2,chr3", type=str, default='All')
+    artemis_subparser.add_argument("-weights", metavar='',help="file with callability (defaults to all positions being called)")
+    artemis_subparser.add_argument("-mutrates", metavar='',help="file with mutation rates (default is mutation rate is uniform)")
     artemis_subparser.add_argument("-param", metavar='',help="[required] markov parameters file (default is human/neanderthal like parameters)", type=str, required = True)
+    artemis_subparser.add_argument("-window_size", metavar='',help="size of bins (default is 1000 bp)", type=int, default = 1000)
+    artemis_subparser.add_argument("-haploid",help="Change from using diploid data to haploid data (default is diploid)", action='store_true', default = False)
     artemis_subparser.add_argument("-out", metavar='',help="Save alphas, likelihoods and pointwise accuracy to file (default is stdout)", default ='/dev/stdout')
     artemis_subparser.add_argument("-out_plot", metavar='',help="File path for artemis plot - can be pdf or jpg (default is Artemis_plot.pdf)", default = 'Artemis_plot.pdf')
-    artemis_subparser.add_argument("-windows", metavar='',help="Number of Kb windows to create (defaults to 500,000)", type=int, default = 500000)
-    artemis_subparser.add_argument("-iterations",help="Number of iterations", type = int, default = 10)
     artemis_subparser.add_argument("-start",help="First alpha values to simulate (default is 0)", type=float, default = 0.0)
     artemis_subparser.add_argument("-end",help="Last alpha values to simulate (default is 1)", type=float, default = 1.0)
     artemis_subparser.add_argument("-steps",help="Number of steps (values to simulate between start and end)", type=int, default = 101)
-    artemis_subparser.add_argument("-seed", metavar='',help="set seed", type=int, default=42)
+
+    # Find best alpha (artemis plots but simulated)
+    artemis_sim_subparser = subparser.add_parser('artemis_sim', help='Finds best alphas and make artemis plots from simulated data')
+    artemis_sim_subparser.add_argument("-param", metavar='',help="[required] markov parameters file (default is human/neanderthal like parameters)", type=str, required = True)
+    artemis_sim_subparser.add_argument("-out", metavar='',help="Save alphas, likelihoods and pointwise accuracy to file (default is stdout)", default ='/dev/stdout')
+    artemis_sim_subparser.add_argument("-out_plot", metavar='',help="File path for artemis plot - can be pdf or jpg (default is Artemis_plot_sim.pdf)", default = 'Artemis_plot_sim.pdf')
+    artemis_sim_subparser.add_argument("-n_sim_windows", metavar='',help="Number of Kb windows to create (defaults to 500,000)", type=int, default = 500000)
+    artemis_sim_subparser.add_argument("-seed", metavar='',help="set seed", type=int, default=42)
+    artemis_sim_subparser.add_argument("-start",help="First alpha values to simulate (default is 0)", type=float, default = 0.0)
+    artemis_sim_subparser.add_argument("-end",help="Last alpha values to simulate (default is 1)", type=float, default = 1.0)
+    artemis_sim_subparser.add_argument("-steps",help="Number of steps (values to simulate between start and end)", type=int, default = 101)
+    
 
     args = parser.parse_args()
 
@@ -227,7 +261,7 @@ def main():
 
         hmm_parameters = read_HMM_parameters_from_file(args.param)
         obs, _, _, _, mutrates, weights = Load_observations_weights_mutrates(args.obs, args.weights, args.mutrates, args.window_size, args.haploid, args.chrom)
-        
+                
         print('-' * 40)
         print(hmm_parameters)
         print(f'> chromosomes to use: {args.chrom}')
@@ -239,7 +273,7 @@ def main():
         print('> Haploid',args.haploid) 
         print('-' * 40)
 
-        hmm_parameters = TrainModel(obs, mutrates, weights, hmm_parameters)
+        hmm_parameters = TrainModel(obs, mutrates, weights, hmm_parameters, args.epsilon, args.max_iterations)
         write_HMM_to_file(hmm_parameters, args.out)
 
 
@@ -261,22 +295,22 @@ def main():
         print('> Window size is',args.window_size, 'bp') 
         print('> Haploid',args.haploid)
 
-        emissions = Emission_probs_poisson(hmm_parameters.emissions, obs, weights, mutrates)
-        posterior_probs = Calculate_Posterior_probabillities(emissions, hmm_parameters)
+        emission_probs = Emission_probs_poisson(hmm_parameters.emissions, obs, weights, mutrates)
+        posterior_probs = Calculate_Posterior_probabillities(emission_probs, hmm_parameters)
 
         if args.hybrid != -1:
             if 0 <= args.hybrid <= 1:
                 print(f'> Decode using hybrid algorithm with parameter: {args.hybrid}')
                 print('-' * 40) 
                 logged_posterior_probs = np.log(posterior_probs.T)
-                path = Hybrid_path(emissions, hmm_parameters.starting_probabilities, hmm_parameters.transitions, logged_posterior_probs, args.hybrid)
+                path = Hybrid_path(emission_probs, hmm_parameters.starting_probabilities, hmm_parameters.transitions, logged_posterior_probs, args.hybrid)
             else:
                 sys.exit('\n\nERROR! Hybrid parameter must be between 0 and 1\n\n')
         else:
             if args.viterbi:
                 print('> Decode using viterbi algorithm') 
                 print('-' * 40)
-                path = Viterbi_path(emissions, hmm_parameters)
+                path = Viterbi_path(emission_probs, hmm_parameters)
             else:
                 print('> Decode with posterior decoding')
                 print('-' * 40) 
@@ -284,7 +318,7 @@ def main():
 
 
         if args.posterior_probs is not None:
-            Write_posterior_probs(chroms, starts, weights, mutrates, posterior_probs, path, variants, hmm_parameters, args.posterior_probs)
+            Write_posterior_probs(chroms, starts, weights, mutrates, posterior_probs, path, variants, hmm_parameters, args.posterior_probs, args.admixpop, args.obs)
         
         segments = Convert_genome_coordinates(args.window_size, CHROMOSOME_BREAKPOINTS, starts, variants, posterior_probs, path, hmm_parameters, weights, mutrates, obs)
         Write_Decoded_output(args.out, segments, args.obs, args.admixpop, args.extrainfo)
@@ -305,19 +339,26 @@ def main():
         print(f'> total callability: {int(np.sum(weights) * args.window_size)} bp ({round(np.sum(weights) / len(obs) * 100,2)} %)')
         print('> average mutation rate per bin:', round(np.sum(mutrates * weights) / np.sum(weights), 2) )
         print('> Output prefix is',args.out) 
+        print(f'> Seed is {args.seed}')
         print('> Window size is',args.window_size, 'bp') 
         print('> Haploid',args.haploid) 
         print('-' * 40)
 
         # Find segments and write output
-        emissions = Emission_probs_poisson(hmm_parameters.emissions, obs, weights, mutrates)   
-        posterior_probs = Calculate_Posterior_probabillities(emissions, hmm_parameters)
-        starting_probabilities, inhom_transition_matrix = Make_inhomogeneous_transition_matrix(emissions, hmm_parameters)
+        emission_probs = Emission_probs_poisson(hmm_parameters.emissions, obs, weights, mutrates)   
+        posterior_probs = Calculate_Posterior_probabillities(emission_probs, hmm_parameters)
+        starting_probabilities, inhom_transition_matrix = Make_inhomogeneous_transition_matrix(emission_probs, hmm_parameters)
 
         if args.inhomogen_matrix is not None:
             Write_inhomogeneous_transition_matrix(chroms, starts, weights, mutrates, variants, hmm_parameters, inhom_transition_matrix, args.inhomogen_matrix)
 
+
+        # Config (set seed)
+        np.random.seed(args.seed)
+        set_seed(args.seed)
+
         for sim_number in range(args.samples):
+
             print(f'Running inhomogen markov chain simulation {sim_number + 1}/{args.samples}')
             path = Simulate_from_transition_matrix(starting_probabilities, inhom_transition_matrix)
             segments = Convert_genome_coordinates(args.window_size, CHROMOSOME_BREAKPOINTS, starts, variants, posterior_probs, path, hmm_parameters, weights, mutrates, obs)
@@ -403,19 +444,52 @@ def main():
     # ------------------------------------------------------------------------------------------------------------
     elif args.mode == 'artemis':
 
+
+        obs, chroms, starts, variants, mutrates, weights  = Load_observations_weights_mutrates(args.obs, args.weights, args.mutrates, args.window_size, args.haploid, args.chrom)
+        hmm_parameters = read_HMM_parameters_from_file(args.param)
+
+        print('-' * 40)
+        print(hmm_parameters)  
+        print(f'> chromosomes to use: {args.chrom}')
+        print(f'> number of windows: {len(obs)}. Number of snps = {sum(obs)}')
+        print(f'> total callability: {int(np.sum(weights) * args.window_size)} bp ({round(np.sum(weights) / len(obs) * 100,2)} %)')
+        print('> average mutation rate per bin:', round(np.sum(mutrates * weights) / np.sum(weights), 2) )
+        print('> Window size is',args.window_size, 'bp') 
+        print('> Haploid',args.haploid)
+        print(f'> Save data to {args.out}')
+        print(f'> Save plot to {args.out_plot}')       
+        print(f'> Test {args.steps} alphas between {args.start} and {args.end}:')
+        print('-' * 40)
+
+        # 1) Find best alpha data
+        x_coordinates, y_coordinates, alphas = Find_best_alpha(obs, mutrates, weights, hmm_parameters, args.start, args.end, args.steps)
+        
+        # 2) Do simulations (optional) 
+        Write_Artemis_output(hmm_parameters, x_coordinates, y_coordinates, alphas, args.out, None)
+
+        # 3) plot results
+        Make_Artemis_Plot(x_coordinates, y_coordinates, alphas, args.out_plot)
+   
+
+    # Find best alphas and make artemis plots
+    # ------------------------------------------------------------------------------------------------------------
+    elif args.mode == 'artemis_sim':
+
         hmm_parameters = read_HMM_parameters_from_file(args.param)
 
         print('-' * 40)
         print(hmm_parameters)  
         print(f'> Save data to {args.out}')
         print(f'> Save plot to {args.out_plot}')
-        print(f'> Number of windows: {args.windows}')
-        print(f'> Number of iterations: {args.iterations}')
+        print(f'> Number of windows: {args.n_sim_windows}')
         print(f'> Test {args.steps} alphas between {args.start} and {args.end}:')
         print(f'> Seed is {args.seed}')
         print('-' * 40)
 
-        Find_best_alpha(hmm_parameters, args.windows, args.out, args.out_plot, args.iterations,  args.start, args.end, args.steps, args.seed)
+        x_coordinates_sim, y_coordinates_sim, alphas_sim, confusion_matrix = Find_best_alpha_simulated(hmm_parameters, args.n_sim_windows, args.start, args.end, args.steps, args.seed)
+        Write_Artemis_output(hmm_parameters, x_coordinates_sim, y_coordinates_sim, alphas_sim, args.out, confusion_matrix)
+        Make_Artemis_Plot(x_coordinates_sim, y_coordinates_sim, alphas_sim, args.out_plot)
+
     
     
     # Print usage

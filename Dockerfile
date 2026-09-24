@@ -13,7 +13,7 @@ RUN apt-get update \
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     MPLBACKEND=Agg \
-    NUMBA_CACHE_DIR=/tmp/numba-cache
+    NUMBA_CACHE_DIR=/opt/numba-cache
 
 WORKDIR /opt/hmmix
 COPY docker/constraints.txt docker/constraints.txt
@@ -21,8 +21,14 @@ COPY pyproject.toml README.md LICENSE ./
 COPY src src
 RUN pip install -c docker/constraints.txt .
 
-RUN useradd --create-home hmmix
+RUN useradd --create-home hmmix && mkdir -p /opt/numba-cache && chown hmmix /opt/numba-cache
 USER hmmix
+
+# Compile the numba functions once at build time, so that `docker run` does not have to
+# (numba recompiles by itself if the image runs on a CPU with different features).
+COPY tests/regression/run_pipeline.sh /opt/hmmix/run_pipeline.sh
+RUN bash /opt/hmmix/run_pipeline.sh /tmp/warmup hmmix && rm -rf /tmp/warmup
+
 WORKDIR /data
 ENTRYPOINT ["hmmix"]
 

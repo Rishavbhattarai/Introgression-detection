@@ -66,6 +66,31 @@ If you want to work with bcf/vcf files you should also install vcftools and bcft
 conda install -c bioconda vcftools bcftools
 ```
 
+To install the development version from GitHub (Python 3.10 or newer):
+
+```bash
+pip install git+https://github.com/LauritsSkov/Introgression-detection.git
+```
+
+### Docker
+
+The Docker image contains hmmix together with bcftools and vcftools. Mount your working directory at `/data`:
+
+```bash
+docker build -t hmmix .
+docker run --rm -v "$PWD":/data hmmix make_test_data
+docker run --rm -v "$PWD":/data hmmix train -obs=obs.txt -weights=weights.bed -mutrates=mutrates.bed -param=Initialguesses.json -out=trained.json
+```
+
+### Running the tests
+
+```bash
+pip install -e ".[test]"
+pytest
+```
+
+`tests/regression` runs every subcommand on small simulated data and compares the output with the output of hmmix 0.9.2; the tests that need bcftools/vcftools are skipped when they are not installed. `benchmarks/run_benchmarks.py` compares the speed and memory use of two installations.
+
 ![Overview of model](https://user-images.githubusercontent.com/30321818/43464826-4d11d46c-94dc-11e8-8f1a-6851aa5d9125.jpg)
 
 The way the model works is by removing variation found in an outgroup population and then using the remaining variants to group the genome into regions of different variant density. If the model works well we would expect that introgressed regions have higher variant density than non-introgressed - because they have spend more time accumulation variation that is not found in the outgroup.

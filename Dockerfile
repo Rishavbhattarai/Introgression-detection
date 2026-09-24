@@ -33,7 +33,7 @@ RUN bash /opt/hmmix/run_pipeline.sh /tmp/warmup hmmix && rm -rf /tmp/warmup
 # Allow running as any user (docker run --user "$(id -u):$(id -g)"), so that output
 # files in the mounted directory belong to the caller.
 USER root
-RUN chmod -R a+rwX /opt/numba-cache
+RUN chmod -R a+rwX /opt/numba-cache && rm -rf /tmp/matplotlib
 USER hmmix
 
 WORKDIR /data

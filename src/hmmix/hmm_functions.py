@@ -59,7 +59,7 @@ def write_HMM_to_file(hmmparam, outfile):
 # HMM functions
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-@njit
+@njit(cache=True)
 def poisson_probability_underflow_safe(n, lam):
     # naive:   np.exp(-lam) * lam**n / factorial(n)
 
@@ -70,7 +70,7 @@ def poisson_probability_underflow_safe(n, lam):
         p /= i+1
     return p
 
-@njit
+@njit(cache=True)
 def Emission_probs_poisson(emissions, observations, weights, mutrates):
     n = len(observations)
     n_states = len(emissions)
@@ -83,16 +83,22 @@ def Emission_probs_poisson(emissions, observations, weights, mutrates):
 
     return probabilities
 
-@njit
+@njit(cache=True)
 def fwd_step(alpha_prev, E, trans_mat):
-    alpha_new = (alpha_prev @ trans_mat) * E
+    n_states = len(alpha_prev)
+    alpha_new = np.zeros(n_states)
+    for j in range(n_states):
+        acc = 0.0
+        for i in range(n_states):
+            acc += alpha_prev[i] * trans_mat[i, j]
+        alpha_new[j] = acc * E[j]
     n = np.sum(alpha_new)
     return alpha_new / n, n
 
-@njit
+@njit(cache=True)
 def forward(probabilities, transitions, init_start):
-    n = len(probabilities)
-    forwards_in = np.zeros( (n, len(init_start)) ) 
+    n, n_states = probabilities.shape
+    forwards_in = np.zeros( (n, n_states) ) 
     scale_param = np.ones(n)
 
     for t in range(n):
@@ -101,43 +107,75 @@ def forward(probabilities, transitions, init_start):
             scale_param[t] = np.sum( forwards_in[t,:])
             forwards_in[t,:] = forwards_in[t,:] / scale_param[t]  
         else:
-            forwards_in[t,:], scale_param[t] =  fwd_step(forwards_in[t-1,:], probabilities[t,:], transitions) 
+            # same arithmetic as fwd_step, written in place
+            total = 0.0
+            for j in range(n_states):
+                acc = 0.0
+                for i in range(n_states):
+                    acc += forwards_in[t-1, i] * transitions[i, j]
+                forwards_in[t, j] = acc * probabilities[t, j]
+                total += forwards_in[t, j]
+            scale_param[t] = total
+            for j in range(n_states):
+                forwards_in[t, j] = forwards_in[t, j] / total
 
     return forwards_in, scale_param
 
-@njit
+@njit(cache=True)
 def bwd_step(beta_next, E, trans_mat, n):
-    beta = (trans_mat * E) @ beta_next
-    return beta / n
+    n_states = len(beta_next)
+    beta = np.zeros(n_states)
+    for i in range(n_states):
+        acc = 0.0
+        for j in range(n_states):
+            acc += (trans_mat[i, j] * E[j]) * beta_next[j]
+        beta[i] = acc / n
+    return beta
 
-@njit
+@njit(cache=True)
 def backward(emission_probs, transitions, scales):
     n, n_states = emission_probs.shape
     beta = np.ones((n, n_states))
-    for i in range(n - 1, 0, -1):
-        beta[i - 1,:] = bwd_step(beta[i,:], emission_probs[i,:], transitions, scales[i])
+    for t in range(n - 1, 0, -1):
+        # same as bwd_step(beta[t,:], emission_probs[t,:], transitions, scales[t]), in place
+        for i in range(n_states):
+            acc = 0.0
+            for j in range(n_states):
+                acc += (transitions[i, j] * emission_probs[t, j]) * beta[t, j]
+            beta[t - 1, i] = acc / scales[t]
     return beta
+
+
+def forward_pass(hmm_parameters, weights, obs, mutrates):
+    """Emission probabilities, scaled forward probabilities and scales for the given parameters"""
+    emission_probs = Emission_probs_poisson(hmm_parameters.emissions, obs, weights, mutrates)
+    forward_probs, scales = forward(emission_probs, hmm_parameters.transitions, hmm_parameters.starting_probabilities)
+    return emission_probs, forward_probs, scales
 
 
 def GetProbability(hmm_parameters, weights, obs, mutrates):
 
-    emission_probs = Emission_probs_poisson(hmm_parameters.emissions, obs, weights, mutrates)
-    _, scales = forward(emission_probs, hmm_parameters.transitions, hmm_parameters.starting_probabilities)
+    _, _, scales = forward_pass(hmm_parameters, weights, obs, mutrates)
     forward_probility_of_obs = np.sum(np.log(scales))
 
     return forward_probility_of_obs
 
 
-@njit
-def fwd_step_keep_track(alpha_prev, E, trans_mat):
+@njit(cache=True)
+def fwd_step_keep_track(alpha_prev, E, trans_mat, results, back_track_states):
+    """One Viterbi step, written into results and back_track_states (no allocations)"""
     
-    # scaling factor
-    n = np.sum((alpha_prev @ trans_mat) * E)
+    # scaling factor: sum((alpha_prev @ trans_mat) * E)
+    n = 0.0
+    for j in range(len(E)):
+        acc = 0.0
+        for i in range(len(E)):
+            acc += alpha_prev[i] * trans_mat[i, j]
+        n += acc * E[j]
     
-    results = np.zeros(len(E))
-    back_track_states = np.zeros(len(E))
-
     for current_s in range(len(E)):
+        results[current_s] = 0.0
+        back_track_states[current_s] = 0
         for prev_s in range(len(E)):
             new_prob = alpha_prev[prev_s] * trans_mat[prev_s, current_s] * E[current_s] / n
 
@@ -145,10 +183,8 @@ def fwd_step_keep_track(alpha_prev, E, trans_mat):
                 results[current_s] = new_prob
                 back_track_states[current_s] = prev_s
 
-    return results, back_track_states
 
-
-@njit
+@njit(cache=True)
 def viterbi(probabilities, transitions, init_start):
     n = len(probabilities)
     forwards_in = np.zeros( (n, len(init_start)) ) 
@@ -160,17 +196,17 @@ def viterbi(probabilities, transitions, init_start):
             scale_param = np.sum( forwards_in[t,:])
             forwards_in[t,:] = forwards_in[t,:] / scale_param
         else:
-            forwards_in[t,:], backtracks[t,:] =  fwd_step_keep_track(forwards_in[t-1,:], probabilities[t,:], transitions) 
+            fwd_step_keep_track(forwards_in[t-1,:], probabilities[t,:], transitions, forwards_in[t,:], backtracks[t,:])
 
     return forwards_in, backtracks
 
 
-@njit
+@njit(cache=True)
 def calculate_log(x):
 	return np.log(x)
 
 
-@njit
+@njit(cache=True)
 def hybrid_step(prev, alpha, em, trans):
     value = prev + alpha * calculate_log(em * trans)
     best_state = np.argmax(value)
@@ -202,15 +238,18 @@ def logoutput(hmm_parameters, loglikelihood, iteration):
 
 
 
-def TrainBaumWelsch(hmm_parameters, weights, obs, mutrates):
+def TrainBaumWelsch(hmm_parameters, weights, obs, mutrates, forward_results = None):
     """
     Trains the model once, using the forward-backward algorithm. 
+
+    forward_results can be the output of forward_pass() for hmm_parameters, to avoid computing it twice.
     """
 
     n_states = len(hmm_parameters.starting_probabilities)
 
-    emission_probs = Emission_probs_poisson(hmm_parameters.emissions, obs, weights, mutrates)
-    forward_probs, scales = forward(emission_probs, hmm_parameters.transitions, hmm_parameters.starting_probabilities)
+    if forward_results is None:
+        forward_results = forward_pass(hmm_parameters, weights, obs, mutrates)
+    emission_probs, forward_probs, scales = forward_results
     backward_probs = backward(emission_probs, hmm_parameters.transitions, scales)
 
     # Update starting probs
@@ -244,13 +283,16 @@ def TrainModel(obs, mutrates, weights, hmm_parameters, epsilon, maxiterations):
 
 
     # Get probability of data with initial parameters
-    previous_loglikelihood = GetProbability(hmm_parameters, weights, obs, mutrates)
+    forward_results = forward_pass(hmm_parameters, weights, obs, mutrates)
+    previous_loglikelihood = np.sum(np.log(forward_results[2]))
     logoutput(hmm_parameters, previous_loglikelihood, 0)
     
     # Train parameters using Baum Welch algorithm
+    # (the forward pass used for the likelihood is reused by the next Baum-Welch step)
     for i in range(1,maxiterations):
-        hmm_parameters = TrainBaumWelsch(hmm_parameters, weights, obs, mutrates)
-        new_loglikelihood = GetProbability(hmm_parameters, weights, obs, mutrates)
+        hmm_parameters = TrainBaumWelsch(hmm_parameters, weights, obs, mutrates, forward_results)
+        forward_results = forward_pass(hmm_parameters, weights, obs, mutrates)
+        new_loglikelihood = np.sum(np.log(forward_results[2]))
         logoutput(hmm_parameters, new_loglikelihood, i)
 
         if new_loglikelihood - previous_loglikelihood < epsilon:       
@@ -299,7 +341,7 @@ def Viterbi_path(emission_probs, hmm_parameters):
 
     return viterbi_path
 
-@njit
+@njit(cache=True)
 def Hybrid_path(emission_probs, starting_probs, trans_matrix, logged_posterior_probabilities, ALPHA):
     """
     Decodes the model using the hybrid method. When alpha parameter is 0 this is the same as posterior and when it is 1 it is the same as viterbi
@@ -316,7 +358,13 @@ def Hybrid_path(emission_probs, starting_probs, trans_matrix, logged_posterior_p
 
     for t in range(1, n_obs):
         for state in range(n_states):
-            best_state, max_prob = hybrid_step(delta[t-1, :], ALPHA, emission_probs[t,state] , trans_matrix[:, state] )
+            # same as hybrid_step(delta[t-1, :], ALPHA, emission_probs[t,state], trans_matrix[:, state]), without temporary arrays
+            best_state = 0
+            max_prob = delta[t-1, 0] + ALPHA * np.log(emission_probs[t,state] * trans_matrix[0, state])
+            for prev_state in range(1, n_states):
+                value = delta[t-1, prev_state] + ALPHA * np.log(emission_probs[t,state] * trans_matrix[prev_state, state])
+                if value > max_prob:
+                    best_state, max_prob = prev_state, value
             delta[t,state] = max_prob + BETA * logged_posterior_probabilities[t,state]
             psi[t-1,state] = best_state
         
@@ -335,7 +383,7 @@ def Hybrid_path(emission_probs, starting_probs, trans_matrix, logged_posterior_p
 # inhomogeneous markov chain
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-@njit
+@njit(cache=True)
 def Simulate_values(p):
     return np.random.binomial(1, p)
 
@@ -386,13 +434,29 @@ def Make_inhomogeneous_transition_matrix(emission_probs, hmm_parameters):
             new_transition_matrix[1:, otherstate, state] = (backward_probs[1:, state] ) / (backward_probs[:-1, otherstate] * scales[1:]) * hmm_parameters.transitions[otherstate, state] * emission_probs[1:, state]
     
     # normalize
-    for n in range(1, n_obs):
-        for otherstate in range(n_states):
-            new_transition_matrix[n, otherstate, :] /= np.sum(new_transition_matrix[n, otherstate, :])
+    new_transition_matrix[1:] /= new_transition_matrix[1:].sum(axis=2, keepdims=True)
     
 
     return sim_starting_probabilities, new_transition_matrix
 
+
+
+@njit(cache=True)
+def simulate_two_state_chain(first_state, stay_probabilities):
+    """
+    Two-state Markov chain where stay_probabilities[t, s] is the probability of staying in state s at step t.
+    Draws the same random numbers in the same order as calling Simulate_transition in a loop.
+    """
+    n = stay_probabilities.shape[0]
+    path = np.zeros(n, dtype=np.int64)
+    current_state = first_state
+    path[0] = current_state
+    for t in range(1, n):
+        p_stay = min(stay_probabilities[t, current_state], 1.0)
+        if np.random.binomial(1, p_stay) != 1:
+            current_state = 1 - current_state
+        path[t] = current_state
+    return path
 
 
 def Simulate_from_transition_matrix(sim_starting_probabilities, new_transition_matrix):
@@ -404,6 +468,10 @@ def Simulate_from_transition_matrix(sim_starting_probabilities, new_transition_m
     # set start state
     current_state = np.random.choice(n_states, p=sim_starting_probabilities)
     sim_path[0] = current_state
+
+    if n_states == 2:
+        stay_probabilities = np.stack([new_transition_matrix[:, 0, 0], new_transition_matrix[:, 1, 1]], axis=1)
+        return simulate_two_state_chain(current_state, stay_probabilities)
 
     for t in range(1, number_observations):
         next_state = Simulate_transition(n_states, new_transition_matrix[t,current_state,:], current_state)
@@ -419,8 +487,18 @@ def Simulate_from_transition_matrix(sim_starting_probabilities, new_transition_m
 # Write segments to output file
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+# Rows are formatted in chunks: np.round is what round(np.float64, 4) uses, and str() of
+# Python floats is the same text print() gives for numpy float64 values.
+WRITE_CHUNK_SIZE = 100_000
+
+
+def _format_columns(values):
+    """Round a (n, k) array to 4 decimals and return one tab-separated string per row"""
+    return ['\t'.join(map(str, row)) for row in np.round(values, 4).tolist()]
+
+
 def Write_inhomogeneous_transition_matrix(chroms, starts, weights, mutrates, variants, hmm_parameters, new_transition_matrix, filename):
-    n_states = len(hmm_parameters.state_names)
+    n_obs = len(chroms)
 
     with open(filename, 'w') as out:
         state_combs = []
@@ -431,18 +509,18 @@ def Write_inhomogeneous_transition_matrix(chroms, starts, weights, mutrates, var
         state_combs = '\t'.join(state_combs)
         print('chrom', 'start', 'called_sequence', 'mutationrate', state_combs,'variants', sep = '\t', file = out)
 
-        for (chrom, start, w, m, transvalues, var) in zip(chroms, starts, weights, mutrates, new_transition_matrix, variants):
-            posterior_to_print = []
-            for state1 in range(n_states):
-                for state2 in range(n_states):
-                    posterior_to_print.append(str(transvalues[state1, state2] ))
-            posterior_to_print = '\t'.join(posterior_to_print)
-
-            print(chrom, start, w, m, posterior_to_print, var, sep = '\t', file = out)
+        for lo in range(0, n_obs, WRITE_CHUNK_SIZE):
+            hi = min(lo + WRITE_CHUNK_SIZE, n_obs)
+            # full precision (not rounded)
+            transvalues = ['\t'.join(map(str, row)) for row in new_transition_matrix[lo:hi].reshape(hi - lo, -1).tolist()]
+            rows = zip(chroms[lo:hi], np.asarray(starts[lo:hi]).tolist(), np.asarray(weights[lo:hi]).tolist(), np.asarray(mutrates[lo:hi]).tolist(), transvalues, variants[lo:hi])
+            out.write(''.join(f'{chrom}\t{start}\t{w}\t{m}\t{trans}\t{var}\n' for chrom, start, w, m, trans, var in rows))
 
 
 def Write_posterior_probs(chroms, starts, weights, mutrates, post_seq, path, variants, hmm_parameters, outfile, admixpop_file, obs_file):
     post_seq = post_seq.T
+    n_obs = len(chroms)
+    state_names = [str(x) for x in hmm_parameters.state_names]
 
     annotated_header = ''
 
@@ -451,24 +529,20 @@ def Write_posterior_probs(chroms, starts, weights, mutrates, post_seq, path, var
         admix_pop_variants, _ = Annotate_with_ref_genome(admixpop_file, obs_file)
         annotated_header = '\tshared_with'
 
+    def archaic_variants_by_position(chrom, var):
+        if admixpop_file is None or var == '':
+            return ''
+        return ','.join(admix_pop_variants[f'{chrom}_{snp}'] for snp in var.split(','))
+
     with open(outfile, 'w') as out:
-        state_names = '\t'.join(hmm_parameters.state_names)
-        print('chrom', 'start', 'called_sequence', 'mutationrate', state_names,'state',f'variants{annotated_header}', sep = '\t', file = out)
+        print('chrom', 'start', 'called_sequence', 'mutationrate', '\t'.join(state_names),'state',f'variants{annotated_header}', sep = '\t', file = out)
 
-        for (chrom, start, w, m, posterior, state, var) in zip(chroms, starts, weights, mutrates, post_seq, path, variants):
-            posterior_to_print = '\t'.join([str(round(x, 4)) for x in posterior])
-
-            archaic_variants_by_position = []
-            if admixpop_file is not None:
-
-                if var != '':
-                    for snp in var.split(','):
-                        carriers = admix_pop_variants[f'{chrom}_{snp}']
-                        archaic_variants_by_position.append(carriers)
-            archaic_variants_by_position = ','.join(archaic_variants_by_position)
-
-
-            print(chrom, start, w, m, posterior_to_print, hmm_parameters.state_names[state], var, archaic_variants_by_position, sep = '\t', file = out)
+        for lo in range(0, n_obs, WRITE_CHUNK_SIZE):
+            hi = min(lo + WRITE_CHUNK_SIZE, n_obs)
+            posteriors = _format_columns(post_seq[lo:hi])
+            rows = zip(chroms[lo:hi], np.asarray(starts[lo:hi]).tolist(), np.asarray(weights[lo:hi]).tolist(), np.asarray(mutrates[lo:hi]).tolist(), posteriors, np.asarray(path[lo:hi]).tolist(), variants[lo:hi])
+            out.write(''.join(f'{chrom}\t{start}\t{w}\t{m}\t{posterior}\t{state_names[state]}\t{var}\t{archaic_variants_by_position(chrom, var)}\n'
+                              for chrom, start, w, m, posterior, state, var in rows))
 
 
 

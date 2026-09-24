@@ -9,17 +9,17 @@ from .helper_functions import find_runs
 # Make test data
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-@njit
+@njit(cache=True)
 def set_seed(value):
     np.random.seed(value)
 
 
-@njit
+@njit(cache=True)
 def simulatate_mutation_position(n_mutations):
     return np.random.choice(1000, n_mutations)
 
 
-@njit
+@njit(cache=True)
 def simulate_poisson(lam):
     return np.random.poisson(lam)
 
@@ -41,14 +41,18 @@ def simulate_path(data_set_length, n_chromosomes, hmm_parameters, SEED):
     weights = np.ones(total_size)
     mutrates = np.ones(total_size)  
 
+    # Use prior dist if starting window
+    current_state = np.random.choice(state_values, p=hmm_parameters.starting_probabilities)
+
+    if n_states == 2:
+        path, observations = simulate_two_state_path(current_state, total_size, hmm_parameters.transitions, hmm_parameters.emissions)
+        return observations, mutrates, weights, path
+
+    prevstate = current_state
     for index in range(total_size):
         
-        # Use prior dist if starting window
-        if index == 0:
-            current_state = np.random.choice(state_values, p=hmm_parameters.starting_probabilities)
-        else:
+        if index > 0:
             current_state = Simulate_transition(n_states, hmm_parameters.transitions[prevstate,:], prevstate)
-
 
         observations[index] = simulate_poisson(hmm_parameters.emissions[current_state])
         path[index] = current_state
@@ -56,6 +60,25 @@ def simulate_path(data_set_length, n_chromosomes, hmm_parameters, SEED):
             
             
     return observations, mutrates, weights, path
+
+
+@njit(cache=True)
+def simulate_two_state_path(first_state, total_size, transitions, emissions):
+    """
+    Same random draws, in the same order, as the loop in simulate_path (Simulate_transition + simulate_poisson),
+    but compiled.
+    """
+    path = np.zeros(total_size, dtype=np.int64)
+    observations = np.zeros(total_size, dtype=np.int64)
+    current_state = first_state
+    for index in range(total_size):
+        if index > 0:
+            p_stay = min(transitions[current_state, current_state], 1.0)
+            if np.random.binomial(1, p_stay) != 1:
+                current_state = 1 - current_state
+        observations[index] = np.random.poisson(emissions[current_state])
+        path[index] = current_state
+    return path, observations
 
 
 def write_data(path, obs, data_set_length, n_chromosomes, hmm_parameters, SEED):

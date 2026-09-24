@@ -5,11 +5,11 @@ import sys
 from .hmm_functions import Hybrid_path, Emission_probs_poisson, Calculate_Posterior_probabillities, calculate_log
 from .make_test_data import simulate_path, set_seed
 
-@njit
+@njit(cache=True)
 def Speed_up_likelihood(trans, emission):
     return calculate_log(trans * emission)
 
-@njit
+@njit(cache=True)
 def Calculate_loglikelihood(path, emissions, starting_probabilities, transitions):
 
     loglikelihood = 0

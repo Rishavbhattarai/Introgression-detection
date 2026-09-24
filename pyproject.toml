@@ -16,8 +16,6 @@ requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.21",
     "numba>=0.55",
-    # not imported directly: numba needs scipy's BLAS to compile `@` inside @njit functions
-    "scipy>=1.5",
     "matplotlib>=3.3",
 ]
 classifiers = [

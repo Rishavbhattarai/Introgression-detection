@@ -1,8 +1,8 @@
 import numpy as np
 from numba import njit
 
-from hmm_functions import HMMParam, write_HMM_to_file, Simulate_transition
-from helper_functions import find_runs
+from .hmm_functions import HMMParam, write_HMM_to_file, Simulate_transition
+from .helper_functions import find_runs
 
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------------

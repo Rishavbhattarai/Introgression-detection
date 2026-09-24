@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hmmix"
+dynamic = ["version"]
+description = "Find introgressed segments"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "Laurits Skov", email = "lauritsskov2@gmail.com" },
+    { name = "Moises Coll Macia" },
+]
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.21",
+    "numba>=0.55",
+    # not imported directly: numba needs scipy's BLAS to compile `@` inside @njit functions
+    "scipy>=1.5",
+    "matplotlib>=3.3",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+dev = ["pytest>=7", "ruff"]
+
+[project.urls]
+Homepage = "https://github.com/LauritsSkov/Introgression-detection"
+
+[project.scripts]
+hmmix = "hmmix.main:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "hmmix.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: runs the full CLI regression pipeline"]
+
+[tool.ruff]
+line-length = 200
+extend-exclude = ["tests/regression/golden"]
+
+[tool.ruff.lint]
+# Only error-class rules: the existing code style is left alone.
+select = ["E9", "F63", "F7", "F82", "F401"]

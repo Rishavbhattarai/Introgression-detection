@@ -2,7 +2,7 @@ from collections import defaultdict
 import numpy as np
 from numba import njit
 import json
-from helper_functions import find_runs, Annotate_with_ref_genome, Make_folder_if_not_exists, flatten_list
+from .helper_functions import find_runs, Annotate_with_ref_genome, Make_folder_if_not_exists, flatten_list
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------------
 # HMM Parameter Class

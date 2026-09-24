@@ -1,7 +1,7 @@
 import numpy as np
 from collections import defaultdict
 
-from helper_functions import sortby, make_callability_from_bed, Make_folder_if_not_exists
+from .helper_functions import sortby, make_callability_from_bed, Make_folder_if_not_exists
 
 def make_mutation_rate(freqfile, outfile, callablefile, window_size):
 

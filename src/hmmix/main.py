@@ -1,14 +1,14 @@
 import argparse
 import numpy as np
 import sys
-from hmm_functions import TrainModel, write_HMM_to_file, read_HMM_parameters_from_file, Write_Decoded_output, Calculate_Posterior_probabillities, PMAP_path, Viterbi_path, Hybrid_path, Convert_genome_coordinates, Write_posterior_probs, Make_inhomogeneous_transition_matrix, Simulate_from_transition_matrix, Write_inhomogeneous_transition_matrix, Emission_probs_poisson
-from bcf_vcf import make_out_group, make_ingroup_obs
-from make_test_data import simulate_path, write_data, set_seed
-from make_mutationrate import make_mutation_rate
-from helper_functions import Load_observations_weights_mutrates, handle_individuals_input, handle_infiles, combined_files, find_runs
-from artemis import Find_best_alpha, Find_best_alpha_simulated, Make_Artemis_Plot, Write_Artemis_output
+from .hmm_functions import TrainModel, write_HMM_to_file, read_HMM_parameters_from_file, Write_Decoded_output, Calculate_Posterior_probabillities, PMAP_path, Viterbi_path, Hybrid_path, Convert_genome_coordinates, Write_posterior_probs, Make_inhomogeneous_transition_matrix, Simulate_from_transition_matrix, Write_inhomogeneous_transition_matrix, Emission_probs_poisson
+from .bcf_vcf import make_out_group, make_ingroup_obs
+from .make_test_data import simulate_path, write_data, set_seed
+from .make_mutationrate import make_mutation_rate
+from .helper_functions import Load_observations_weights_mutrates, handle_individuals_input, handle_infiles, combined_files, find_runs
+from .artemis import Find_best_alpha, Find_best_alpha_simulated, Make_Artemis_Plot, Write_Artemis_output
 
-VERSION = '0.9.2'
+from . import __version__ as VERSION
 
 def print_script_usage():
     toprint = f'''

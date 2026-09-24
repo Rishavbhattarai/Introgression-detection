@@ -1,10 +1,9 @@
 import numpy as np
 from numba import njit
-import matplotlib.pyplot as plt
 import sys
 
-from hmm_functions import Hybrid_path, Emission_probs_poisson, Calculate_Posterior_probabillities, calculate_log
-from make_test_data import simulate_path, set_seed
+from .hmm_functions import Hybrid_path, Emission_probs_poisson, Calculate_Posterior_probabillities, calculate_log
+from .make_test_data import simulate_path, set_seed
 
 @njit
 def Speed_up_likelihood(trans, emission):
@@ -115,6 +114,11 @@ def Find_best_alpha_simulated(hmm_parameters, data_set_length, START, END, STEPS
 
 
 def Make_Artemis_Plot(x_coordinates, y_coordinates, alphas, out_plot_file):
+
+    # imported here so that the other subcommands do not pay for loading matplotlib
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
 
     # Find best alpha values
     scaled_x_coordinates = scale_values(x_coordinates)

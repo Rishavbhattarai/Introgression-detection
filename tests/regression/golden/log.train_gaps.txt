@@ -1,0 +1,38 @@
+warning, you had 1 observations but no called bases/no mutation rate at index:1272. weights:0.0, mutrates:1.5
+warning, you had 1 observations but no called bases/no mutation rate at index:1278. weights:0.0, mutrates:1.5
+warning, you had 1 observations but no called bases/no mutation rate at index:16500. weights:0.0, mutrates:0.9
+warning, you had 1 observations but no called bases/no mutation rate at index:16502. weights:0.0, mutrates:0.9
+warning, you had 1 observations but no called bases/no mutation rate at index:16519. weights:0.0, mutrates:0.9
+warning, you had 1 observations but no called bases/no mutation rate at index:16536. weights:0.0, mutrates:0.9
+warning, you had 1 observations but no called bases/no mutation rate at index:16543. weights:0.0, mutrates:0.9
+warning, you had 1 observations but no called bases/no mutation rate at index:16549. weights:0.0, mutrates:0.9
+warning, you had 1 observations but no called bases/no mutation rate at index:16558. weights:0.0, mutrates:0.9
+warning, you had 1 observations but no called bases/no mutation rate at index:16579. weights:0.0, mutrates:0.9
+----------------------------------------
+> state_names = ['Human', 'Archaic']
+> starting_probabilities = [0.5, 0.5]
+> transitions = [[0.99, 0.01], [0.02, 0.98]]
+> emissions = [0.03, 0.3]
+> chromosomes to use: All
+> number of windows: 19999. Number of snps = 1434
+> total callability: 16583768 bp (82.92 %)
+> average mutation rate per bin: 1.09
+> Output is trained_gaps.json
+> Window size is 1000 bp
+> Haploid False
+----------------------------------------
+iteration	loglikelihood	start1	start2	emis1	emis2	trans1_1	trans2_2
+0	-4951.2173	0.5	0.5	0.03	0.3	0.99	0.98
+1	-4913.4898	0.794	0.206	0.0317	0.3502	0.993	0.9729
+2	-4896.8954	0.83	0.17	0.0339	0.3996	0.9938	0.9697
+3	-4889.6171	0.851	0.149	0.0354	0.437	0.9943	0.9672
+4	-4886.5892	0.863	0.137	0.0363	0.4634	0.9945	0.9652
+5	-4885.3549	0.87	0.13	0.0369	0.4811	0.9946	0.9636
+6	-4884.86	0.875	0.125	0.0372	0.4927	0.9946	0.9625
+7	-4884.6641	0.877	0.123	0.0375	0.5	0.9946	0.9617
+8	-4884.5869	0.879	0.121	0.0376	0.5046	0.9946	0.9611
+9	-4884.5565	0.88	0.12	0.0376	0.5075	0.9946	0.9607
+10	-4884.5444	0.88	0.12	0.0377	0.5093	0.9946	0.9605
+11	-4884.5395	0.88	0.12	0.0377	0.5104	0.9946	0.9603
+12	-4884.5376	0.881	0.119	0.0377	0.511	0.9946	0.9602
+13	-4884.5368	0.881	0.119	0.0377	0.5115	0.9946	0.9601

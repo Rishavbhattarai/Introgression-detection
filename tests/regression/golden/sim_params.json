@@ -1,0 +1,2 @@
+{"state_names": ["Human", "Archaic"], "starting_probabilities": [0.9, 0.1],
+ "transitions": [[0.995, 0.005], [0.05, 0.95]], "emissions": [0.04, 0.4]}

@@ -1,0 +1,9 @@
+----------------------------------------
+> creating 2 chromosomes each with 10000 kb of test data with the following parameters..
+> hmm parameters file: sim_params.json
+> state_names = ['Human', 'Archaic']
+> starting_probabilities = [0.9, 0.1]
+> transitions = [[0.995, 0.005], [0.05, 0.95]]
+> emissions = [0.04, 0.4]
+> Seed is 7
+----------------------------------------

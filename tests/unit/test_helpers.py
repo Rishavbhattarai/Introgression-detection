@@ -109,7 +109,7 @@ def test_load_observations_defaults(small_obs):
     obs, chroms, starts, variants, mutrates, weights = Load_observations_weights_mutrates(small_obs, None, None, 1000, False, 'All')
     # characterisation: the window holding the last SNP of a chromosome is not included
     assert chroms == ['chr1'] * 4 + ['chr2'] * 3
-    assert starts == [0, 1000, 2000, 3000, 0, 1000, 2000]
+    assert starts.tolist() == [0, 1000, 2000, 3000, 0, 1000, 2000]
     assert obs.tolist() == [1, 0, 2, 0, 0, 1, 0]
     assert variants == ['10', '', '2500,2600', '', '', '1500', '']
     assert obs.dtype.kind == 'i' and weights.dtype == float and mutrates.dtype == float

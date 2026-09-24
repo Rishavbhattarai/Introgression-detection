@@ -49,6 +49,87 @@ def make_callability_from_bed(bedfile, window_size):
 
 
 
+class _WindowArray:
+    '''Growable float array indexed by window number (window start // window_size)'''
+
+    def __init__(self):
+        self.values = np.zeros(1024)
+        self.last_window = None
+
+    def ensure(self, index):
+        if index >= len(self.values):
+            grown = np.zeros(max(index + 1, 2 * len(self.values)))
+            grown[:len(self.values)] = self.values
+            self.values = grown
+
+
+def callability_arrays_from_bed(bedfile, window_size):
+    '''
+    Same numbers as make_callability_from_bed, but stored as one numpy array per chromosome
+    (index = window start // window_size). Additions happen in the same order, so the floating
+    point results are identical. last_window is the largest window make_callability_from_bed
+    would have created a key for.
+    '''
+    callability = {}
+    with open(bedfile) as data:
+        for line in data:
+
+            if line.startswith('chrom'):
+                continue
+
+            fields = line.strip().split('\t')
+            if len(fields) == 3:
+                chrom, start, end = fields
+                value = 1
+            elif len(fields) > 3:
+                chrom, start, end, value = fields[0:4]
+                value = float(value)
+            else:
+                # blank or malformed line
+                continue
+
+            start, end = int(start), int(end)
+
+            firstwindow = start - start % window_size
+            lastwindow = end - end % window_size
+            first, last = firstwindow // window_size, lastwindow // window_size
+
+            if chrom not in callability:
+                callability[chrom] = _WindowArray()
+            windows = callability[chrom]
+            windows.ensure(max(first, last))
+
+            # not spanning multiple windows (all is added to same window)
+            if firstwindow == lastwindow:
+                windows.values[first] += (end-start+1) * value
+                windows.last_window = firstwindow if windows.last_window is None else max(windows.last_window, firstwindow)
+
+            # spanning multiple windows
+            else:
+                firstwindow_fill = window_size - start % window_size
+                lastwindow_fill = end % window_size
+                windows.values[first] += firstwindow_fill * value
+                windows.values[last] += (lastwindow_fill+1) * value
+
+                # fill in windows in the middle
+                if last > first + 1:
+                    windows.values[first + 1:last] += window_size * value
+
+                top = max(firstwindow, lastwindow)
+                windows.last_window = top if windows.last_window is None else max(windows.last_window, top)
+
+    return callability
+
+
+def _window_values(callability, chrom, n_windows, window_size):
+    '''callability[chrom][window] / window_size for the first n_windows windows (0 where missing)'''
+    result = np.zeros(n_windows)
+    if chrom in callability:
+        values = callability[chrom].values[:n_windows]
+        result[:len(values)] = values / float(window_size)
+    return result
+
+
 def Load_observations_weights_mutrates(obs_file, weights_file, mutrates_file, window_size, haploid, chrom_to_look_for):
     '''
     First get structure of genome
@@ -59,10 +140,15 @@ def Load_observations_weights_mutrates(obs_file, weights_file, mutrates_file, wi
     5) fill in weights and mutation rates
     6) make sure no invalid windows exists 
 
+    Returns obs (int array), chroms (list), starts (int array), variants (list of comma separated
+    positions per window), mutrates and weights (float arrays). Memory use is a few arrays of
+    length n_windows: only windows that contain observations are stored while reading.
     '''
 
-    # get span of observation data
+    # read observation data once: span of each chromosome (window of its last line) and, per
+    # chromosome and haplotype, the window index and position of every derived allele
     chromosome_spans = defaultdict(int)
+    snps = defaultdict(lambda: defaultdict(lambda: ([], [])))
     with open(obs_file) as data:
         for line in data:
             if line.startswith('chrom'):
@@ -74,12 +160,24 @@ def Load_observations_weights_mutrates(obs_file, weights_file, mutrates_file, wi
             rounded_pos = zero_based_pos - zero_based_pos % window_size
             chromosome_spans[chrom] = rounded_pos
 
+            window_index = rounded_pos // window_size
+            if haploid:
+                for i, base in enumerate(genotype):
+                    if base != ancestral_base:
+                        windows, positions = snps[chrom][f'_hap{i+1}']
+                        windows.append(window_index)
+                        positions.append(pos)
+            else:
+                windows, positions = snps[chrom]['']
+                windows.append(window_index)
+                positions.append(pos)
 
     # get span of callability
-    if weights_file: 
-        callability = make_callability_from_bed(weights_file, window_size)
-        for chrom in callability:
-            chromosome_spans[chrom] = max(callability[chrom])
+    weights_callability = None
+    if weights_file:
+        weights_callability = callability_arrays_from_bed(weights_file, window_size)
+        for chrom, windows in weights_callability.items():
+            chromosome_spans[chrom] = windows.last_window
 
     # which chromosomes are we interested in
     if chrom_to_look_for != 'All':
@@ -87,92 +185,68 @@ def Load_observations_weights_mutrates(obs_file, weights_file, mutrates_file, wi
     else:
         chromosome_list = sorted(list(chromosome_spans.keys()), key=sortby)
 
-    obs_counter = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
-    haplotypes = defaultdict(int)
-    chroms, starts, variants, obs = [], [], [], []
-
-    # read observation data
-    with open(obs_file) as data:
-        for line in data:
-            if line.startswith('chrom'):
-                continue 
-
-            chrom, pos, ancestral_base, genotype = line.strip().split()
-            if not chrom in chromosome_list:
-                continue
-
-            # convert 1-indexed position to 0-indexed position
-            zero_based_pos = int(pos) - 1
-            rounded_pos = zero_based_pos - zero_based_pos % window_size
-
-            if haploid:  
-                for i, base in enumerate(genotype):
-                    if base != ancestral_base:
-                        obs_counter[chrom][rounded_pos][f'_hap{i+1}'].append(pos)
-                        haplotypes[f'_hap{i+1}'] += 1
-            else:
-                obs_counter[chrom][rounded_pos][''].append(pos)
-                haplotypes[''] += 1
-
+    haplotypes = set()
+    for chrom in chromosome_list:
+        if chrom in snps:
+            haplotypes.update(snps[chrom])
 
     # take care of cases where there is 0 observations
     if len(haplotypes) == 0:
         if haploid:
             sys.exit('Could not determine haploidity because there is no data')
         else:
-            haplotypes[''] += 1
-        
+            haplotypes.add('')
+    haplotypes = sorted(haplotypes, key=sortby_haplotype)
 
-    for haplotype in sorted(haplotypes, key=sortby_haplotype):
-        
+    n_windows = {chrom: len(range(0, chromosome_spans[chrom], window_size)) for chrom in chromosome_list}
+    total_windows = len(haplotypes) * sum(n_windows.values())
+
+    obs = np.zeros(total_windows, dtype=int)
+    starts = np.zeros(total_windows, dtype=int)
+    chroms, variants = [], []
+    offset = 0
+    for haplotype in haplotypes:
         for chrom in chromosome_list:
-            lastwindow = chromosome_spans[chrom]
+            n = n_windows[chrom]
+            name = f'{chrom}{haplotype}'
+            chroms.extend([name] * n)
+            starts[offset:offset + n] = np.arange(n) * window_size
 
-            for window in range(0, lastwindow, window_size):
-                chroms.append(f'{chrom}{haplotype}')   
-                starts.append(window)
-                variants.append(','.join(obs_counter[chrom][window][haplotype]))  
-                obs.append(len(obs_counter[chrom][window][haplotype])) 
-            
+            window_variants = [''] * n
+            if chrom in snps and haplotype in snps[chrom]:
+                windows, positions = snps[chrom][haplotype]
+                windows = np.asarray(windows, dtype=int)
+                inside = windows < n
+                obs[offset:offset + n] = np.bincount(windows[inside], minlength=n)[:n]
+
+                grouped = defaultdict(list)
+                for window_index, pos in zip(windows[inside].tolist(), (p for p, keep in zip(positions, inside) if keep)):
+                    grouped[window_index].append(pos)
+                for window_index, window_positions in grouped.items():
+                    window_variants[window_index] = ','.join(window_positions)
+
+            variants.extend(window_variants)
+            offset += n
 
     # Read weights file is it exists - else set all weights to 1
     if weights_file is None:
-        weights = np.ones(len(obs)) 
-    else:  
-        callability = make_callability_from_bed(weights_file, window_size)
-        weights = []
-        for haplotype in sorted(haplotypes, key=sortby_haplotype):
-            
-            for chrom in chromosome_list:
-                lastwindow = chromosome_spans[chrom]
-
-                for window in range(0, lastwindow, window_size):
-                    weights.append(callability[chrom][window] / float(window_size))
-
+        weights = np.ones(len(obs))
+    else:
+        weights = np.concatenate([_window_values(weights_callability, chrom, n_windows[chrom], window_size) for _ in haplotypes for chrom in chromosome_list] or [np.zeros(0)])
 
     # Read mutation rate file is it exists - else set all mutation rates to 1
     if mutrates_file is None:
-        mutrates = np.ones(len(obs)) 
-    else:  
-        callability = make_callability_from_bed(mutrates_file, window_size)
-        mutrates = []
-        for haplotype in sorted(haplotypes, key=sortby_haplotype):
-            
-            for chrom in chromosome_list:
-                lastwindow = chromosome_spans[chrom]
-
-                for window in range(0, lastwindow, window_size):
-                    mutrates.append(callability[chrom][window] / float(window_size))
-
-
+        mutrates = np.ones(len(obs))
+    else:
+        mutrates_callability = callability_arrays_from_bed(mutrates_file, window_size)
+        mutrates = np.concatenate([_window_values(mutrates_callability, chrom, n_windows[chrom], window_size) for _ in haplotypes for chrom in chromosome_list] or [np.zeros(0)])
 
     # Make sure there are no places with obs > 0 and 0 in mutation rate or weight
-    for index, (observation, w, m) in enumerate(zip(obs, weights, mutrates)):
-        if w*m == 0 and observation != 0:
-            print(f'warning, you had {observation} observations but no called bases/no mutation rate at index:{index}. weights:{w}, mutrates:{m}')
-            obs[index] = 0
-            
-    return np.array(obs).astype(int), chroms, starts, variants, np.array(mutrates).astype(float), np.array(weights).astype(float)
+    for index in np.flatnonzero((weights * mutrates == 0) & (obs != 0)).tolist():
+        print(f'warning, you had {obs[index]} observations but no called bases/no mutation rate at index:{index}. weights:{weights[index]}, mutrates:{mutrates[index]}')
+        obs[index] = 0
+
+    return obs, chroms, starts, variants, mutrates.astype(float), weights.astype(float)
 
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------------

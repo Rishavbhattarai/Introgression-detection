@@ -12,7 +12,7 @@ authors = [
     { name = "Laurits Skov", email = "lauritsskov2@gmail.com" },
     { name = "Moises Coll Macia" },
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.21",
     "numba>=0.55",

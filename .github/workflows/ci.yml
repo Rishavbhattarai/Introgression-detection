@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install ruff
+      - run: ruff check .
+
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        include:
+          - os: macos-latest
+            python-version: "3.13"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install bcftools and vcftools
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y bcftools vcftools tabix
+          else
+            brew install bcftools vcftools
+          fi
+      - run: pip install ".[test]"
+      - run: python -m pytest -v
+        env:
+          MPLBACKEND: Agg
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image and run the test suite inside it
+        run: docker build --target test -t hmmix:test .
+      - name: Build runtime image
+        run: docker build -t hmmix .
+      - name: Smoke test
+        run: |
+          mkdir -p smoke && chmod 777 smoke
+          docker run --rm -v "$PWD/smoke":/data hmmix make_test_data -windows=2000 -chromosomes=1
+          docker run --rm -v "$PWD/smoke":/data hmmix train -obs=obs.txt -weights=weights.bed -mutrates=mutrates.bed -param=Initialguesses.json -out=trained.json
+          docker run --rm -v "$PWD/smoke":/data hmmix decode -obs=obs.txt -weights=weights.bed -mutrates=mutrates.bed -param=trained.json -out=decoded
+          head smoke/decoded.diploid.txt

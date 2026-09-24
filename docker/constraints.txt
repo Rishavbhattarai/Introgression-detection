@@ -1,0 +1,7 @@
+# Versions used in the Docker image (tested with the regression suite).
+numpy==2.5.3
+numba==0.67.0
+llvmlite==0.49.0
+scipy==1.18.1
+matplotlib==3.11.2
+pytest==9.1.1

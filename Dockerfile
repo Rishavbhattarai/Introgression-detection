@@ -35,7 +35,7 @@ ENTRYPOINT ["hmmix"]
 
 FROM runtime AS test
 USER root
-RUN pip install -c docker/constraints.txt pytest
+RUN pip install -c /opt/hmmix/docker/constraints.txt pytest
 COPY tests /opt/hmmix/tests
 RUN chown -R hmmix /opt/hmmix/tests
 USER hmmix

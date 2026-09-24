@@ -4,7 +4,7 @@
 #   docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/data hmmix make_test_data
 #
 # `docker build --target test .` also runs the test suite inside the image.
-FROM python:3.13-slim AS runtime
+FROM python:3.13-slim AS base
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends bcftools vcftools tabix \
@@ -40,7 +40,8 @@ WORKDIR /data
 ENTRYPOINT ["hmmix"]
 
 
-FROM runtime AS test
+# Runs the test suite; the image users get is the runtime stage below.
+FROM base AS test
 USER root
 RUN pip install -c /opt/hmmix/docker/constraints.txt pytest
 COPY tests /opt/hmmix/tests
@@ -48,3 +49,7 @@ RUN chown -R hmmix /opt/hmmix/tests
 USER hmmix
 WORKDIR /opt/hmmix
 RUN python -m pytest -q tests
+
+
+# Default target (last stage): the image without the tests.
+FROM base AS runtime
